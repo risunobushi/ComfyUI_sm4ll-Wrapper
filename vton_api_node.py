@@ -254,23 +254,28 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
     api_model_choice = model_mapping.get(model_choice, model_choice)
     print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}")
     
-    # All models use 4-parameter structure: [base, product, model, mask]
-    # Use user-provided mask if available, otherwise use base image as fallback
-    mask_to_use = mask_file_path if mask_file_path else base_file_path
-    
-    api_data = {
-        "data": [
-            {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
-            {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-            api_model_choice,
-            {"path": mask_to_use, "meta": {"_type": "gradio.FileData"}}
-        ]
-    }
-    
+    # Use different API structures based on mask availability (matching HF Gradio behavior)
     if mask_file_path:
+        # 4-parameter structure with user-provided mask: [base, product, model, mask]
+        api_data = {
+            "data": [
+                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
+                {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
+                api_model_choice,
+                {"path": mask_file_path, "meta": {"_type": "gradio.FileData"}}
+            ]
+        }
         print(f"  🎭 Including user-provided mask in API call: {mask_file_path}")
     else:
-        print(f"  🎭 No mask provided - using base image as fallback mask for {api_model_choice} model")
+        # 3-parameter structure without mask: [base, product, model] (default HF Gradio behavior)
+        api_data = {
+            "data": [
+                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
+                {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
+                api_model_choice
+            ]
+        }
+        print(f"  🎭 No mask provided - using 3-parameter structure (default workflow)")
     
     print(f"  📤 API request data: {api_data}")
     
