@@ -196,14 +196,23 @@ def upload_to_gradio_session(image, base_url, session):
 
 def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session):
     """Call VTON API following the exact Gradio API pattern (like curl -N)."""
-    print(f"\n🎨 Calling VTON API with model: {model_choice}")
+    
+    # Map ComfyUI model choices to API parameters
+    model_mapping = {
+        "eyewear": "eyewear",
+        "footwear": "footwear", 
+        "full-body": "dress"  # API expects "dress" for full-body garments
+    }
+    
+    api_model_choice = model_mapping.get(model_choice, model_choice)
+    print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}")
     
     # Prepare the API call data exactly as shown in the YAML
     api_data = {
         "data": [
             {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
             {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-            model_choice
+            api_model_choice  # Use the mapped API parameter
         ]
     }
     
@@ -433,9 +442,6 @@ class VTONAPINode:
                 "base_person_image": ("IMAGE",),
                 "product_image": ("IMAGE",),
                 "model_choice": (["eyewear", "footwear", "full-body"], {"default": "eyewear"}),
-            },
-            "optional": {
-                "gradio_space_url": ("STRING", {"default": "https://sm4ll-vton-sm4ll-vton-demo.hf.space", "multiline": False}),
             }
         }
     
@@ -443,10 +449,10 @@ class VTONAPINode:
     FUNCTION = "process_vton"
     CATEGORY = "sm4ll/VTON"
     
-    def process_vton(self, base_person_image, product_image, model_choice, gradio_space_url="https://sm4ll-vton-sm4ll-vton-demo.hf.space"):
+    def process_vton(self, base_person_image, product_image, model_choice):
         try:
-            # Clean up the URL
-            base_url = gradio_space_url.strip().rstrip('/')
+            # Use the hardcoded Gradio space URL
+            base_url = "https://sm4ll-vton-sm4ll-vton-demo.hf.space"
             
             # Debug tensor shapes
             print(f"Input base tensor shape: {base_person_image.shape}")
@@ -540,5 +546,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "VTONAPINode": "VTON API Node"
+    "VTONAPINode": "sm4ll Wrapper Sampler"
 } 
