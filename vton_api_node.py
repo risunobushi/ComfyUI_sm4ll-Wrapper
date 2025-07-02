@@ -194,7 +194,7 @@ def upload_to_gradio_session(image, base_url, session):
     
     return None
 
-def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session):
+def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path=None):
     """Call VTON API following the exact Gradio API pattern (like curl -N)."""
     
     # Map ComfyUI model choices to API parameters
@@ -207,7 +207,7 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
     api_model_choice = model_mapping.get(model_choice, model_choice)
     print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}")
     
-    # Prepare the API call data exactly as shown in the YAML
+    # Prepare the API call data - include mask if provided
     api_data = {
         "data": [
             {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
@@ -215,6 +215,13 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
             api_model_choice  # Use the mapped API parameter
         ]
     }
+    
+    # Add mask as 4th parameter if provided by user
+    if mask_file_path:
+        api_data["data"].append({"path": mask_file_path, "meta": {"_type": "gradio.FileData"}})
+        print(f"  🎭 Including mask in API call: {mask_file_path}")
+    else:
+        print(f"  🎭 No mask provided - Gradio backend will use base image fallback")
     
     print(f"  📤 API request data: {api_data}")
     
@@ -442,6 +449,9 @@ class VTONAPINode:
                 "base_person_image": ("IMAGE",),
                 "product_image": ("IMAGE",),
                 "model_choice": (["eyewear", "footwear", "full-body"], {"default": "eyewear"}),
+            },
+            "optional": {
+                "mask_image": ("IMAGE",),  # NEW: Optional mask input
             }
         }
     
@@ -449,7 +459,7 @@ class VTONAPINode:
     FUNCTION = "process_vton"
     CATEGORY = "sm4ll/VTON"
     
-    def process_vton(self, base_person_image, product_image, model_choice):
+    def process_vton(self, base_person_image, product_image, model_choice, mask_image=None):
         try:
             # Use the hardcoded Gradio space URL
             base_url = "https://sm4ll-vton-sm4ll-vton-demo.hf.space"
@@ -513,11 +523,45 @@ class VTONAPINode:
             if not product_file_path:
                 raise Exception("Failed to upload product image to Gradio space")
             
+            # Handle optional mask image
+            mask_file_path = None
+            if mask_image is not None:
+                print("Processing and uploading mask image...")
+                
+                # Convert mask tensor to PIL image
+                mask_pil = tensor_to_pil(mask_image)
+                print(f"Mask image size: {mask_pil.size}")
+                
+                # Validate minimum size requirements for mask
+                if mask_pil.size[0] < 100 or mask_pil.size[1] < 100:
+                    raise Exception(f"Mask image too small: {mask_pil.size}. Minimum 100x100 required.")
+                
+                # Resize mask to same target as other images
+                mask_resized = resize_to_megapixels(mask_pil, 1.62)
+                print(f"Resized mask image size: {mask_resized.size}")
+                
+                # Ensure mask is RGB (ComfyUI masks might be grayscale)
+                if mask_resized.mode != 'RGB':
+                    print(f"Converting mask from {mask_resized.mode} to RGB")
+                    mask_resized = mask_resized.convert('RGB')
+                
+                # Upload mask to Gradio
+                mask_file_path = upload_to_gradio_session(mask_resized, base_url, session)
+                
+                if not mask_file_path:
+                    raise Exception("Failed to upload mask image to Gradio space")
+                
+                print(f"Mask image uploaded: {mask_file_path}")
+            else:
+                print("No mask image provided - will use base image fallback")
+            
             print(f"Base image uploaded: {base_file_path}")
             print(f"Product image uploaded: {product_file_path}")
+            if mask_file_path:
+                print(f"Mask image uploaded: {mask_file_path}")
             
             # Call the VTON API
-            result_path_or_url = call_vton_api(base_file_path, product_file_path, model_choice, base_url, session)
+            result_path_or_url = call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path)
             
             if not result_path_or_url:
                 raise Exception("VTON API call failed - no result returned")
