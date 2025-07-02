@@ -9,46 +9,101 @@ import math
 import io
 
 def tensor_to_pil(tensor: torch.Tensor, batch_index=0):
-    """Converts a ComfyUI image tensor (BCHW, float 0-1) to a PIL Image (RGB)."""
-    # Handle different tensor formats
-    if tensor.ndim == 4:  # BCHW format
-        tensor = tensor[batch_index]
-    elif tensor.ndim == 3 and tensor.shape[0] <= 4:  # CHW format (assume channels first if <= 4 channels)
-        pass  # Already in CHW format
-    elif tensor.ndim == 3:  # HWC format (assume channels last if > 4 channels in first dim)
-        tensor = tensor.permute(2, 0, 1)  # HWC to CHW
-    
-    # Ensure we have CHW format and permute to HWC
-    if tensor.shape[0] <= 4:  # Channels first (CHW)
-        image_np = tensor.permute(1, 2, 0).cpu().numpy()
-    else:  # Already HWC
-        image_np = tensor.cpu().numpy()
-    
-    # Scale to 0-255 and convert to uint8
-    image_np = np.clip(image_np * 255.0, 0, 255).astype(np.uint8)
-    
-    # Handle grayscale
-    if image_np.shape[2] == 1:  # Grayscale tensor
-        return Image.fromarray(image_np.squeeze(), 'L').convert('RGB')
-    
-    # Handle RGB/RGBA
-    if image_np.shape[2] == 3:
-        return Image.fromarray(image_np, 'RGB')
-    elif image_np.shape[2] == 4:
-        return Image.fromarray(image_np, 'RGBA').convert('RGB')
-    else:
-        # Fallback: use first 3 channels
-        return Image.fromarray(image_np[:, :, :3], 'RGB')
+    """Converts a ComfyUI image tensor to a PIL Image (RGB)."""
+    try:
+        # Ensure tensor is on CPU and detached
+        tensor = tensor.detach().cpu()
+        
+        print(f"DEBUG: Input tensor shape: {tensor.shape}, dtype: {tensor.dtype}")
+        print(f"DEBUG: Tensor min: {tensor.min():.3f}, max: {tensor.max():.3f}")
+        
+        # Handle batch dimension
+        if tensor.ndim == 4:  # BCHW format
+            tensor = tensor[batch_index]
+            print(f"DEBUG: After batch selection: {tensor.shape}")
+        
+        # Handle different tensor formats
+        if tensor.ndim == 3:
+            height, width, channels = tensor.shape
+            
+            # Standard ComfyUI format is HWC (Height, Width, Channels)
+            if channels <= 4:  # RGB/RGBA
+                image_np = tensor.numpy()
+                print(f"DEBUG: Using HWC format: {image_np.shape}")
+            else:
+                # If channels > 4, assume it's CHW format
+                if tensor.shape[0] <= 4:  # CHW
+                    image_np = tensor.permute(1, 2, 0).numpy()
+                    print(f"DEBUG: Converted CHW to HWC: {image_np.shape}")
+                else:
+                    # Fallback: assume HWC
+                    image_np = tensor.numpy()
+                    print(f"DEBUG: Fallback HWC: {image_np.shape}")
+                    
+        elif tensor.ndim == 2:  # Grayscale HW
+            image_np = tensor.numpy()
+            image_np = np.expand_dims(image_np, axis=2)  # Add channel dimension
+            print(f"DEBUG: Grayscale expanded: {image_np.shape}")
+        else:
+            raise ValueError(f"Unsupported tensor shape: {tensor.shape}")
+        
+        # Ensure proper range [0, 1] -> [0, 255]
+        if image_np.max() <= 1.0:
+            image_np = image_np * 255.0
+        
+        # Clip and convert to uint8
+        image_np = np.clip(image_np, 0, 255).astype(np.uint8)
+        print(f"DEBUG: Final numpy shape: {image_np.shape}, dtype: {image_np.dtype}")
+        
+        # Handle different channel counts
+        if image_np.shape[2] == 1:  # Grayscale
+            return Image.fromarray(image_np.squeeze(2), 'L').convert('RGB')
+        elif image_np.shape[2] == 3:  # RGB
+            return Image.fromarray(image_np, 'RGB')
+        elif image_np.shape[2] == 4:  # RGBA
+            return Image.fromarray(image_np, 'RGBA').convert('RGB')
+        else:
+            # Use first 3 channels as RGB
+            return Image.fromarray(image_np[:, :, :3], 'RGB')
+            
+    except Exception as e:
+        print(f"ERROR in tensor_to_pil: {e}")
+        print(f"Tensor shape: {tensor.shape}, dtype: {tensor.dtype}")
+        # Create a fallback image
+        return Image.new('RGB', (512, 512), color=(255, 0, 0))
 
 def pil_to_tensor(pil_image: Image.Image):
-    """Converts a PIL Image to a ComfyUI image tensor (BCHW, float 0-1)."""
-    # Convert to numpy array
-    image_np = np.array(pil_image)
-    # Normalize to 0-1
-    image_np = image_np.astype(np.float32) / 255.0
-    # Convert to tensor and rearrange dimensions
-    tensor = torch.from_numpy(image_np).permute(2, 0, 1).unsqueeze(0)  # HWC to BCHW
-    return tensor
+    """Converts a PIL Image to a ComfyUI image tensor (BHWC, float 0-1)."""
+    try:
+        # Ensure image is RGB
+        if pil_image.mode != 'RGB':
+            pil_image = pil_image.convert('RGB')
+        
+        print(f"DEBUG: PIL image size: {pil_image.size}, mode: {pil_image.mode}")
+        
+        # Convert to numpy array (HWC format)
+        image_np = np.array(pil_image)
+        print(f"DEBUG: Numpy array shape: {image_np.shape}, dtype: {image_np.dtype}")
+        
+        # Normalize to 0-1
+        image_np = image_np.astype(np.float32) / 255.0
+        
+        # ComfyUI expects BHWC format (Batch, Height, Width, Channels)
+        # Add batch dimension: HWC -> BHWC
+        tensor = torch.from_numpy(image_np).unsqueeze(0)
+        
+        print(f"DEBUG: Output tensor shape: {tensor.shape}, dtype: {tensor.dtype}")
+        print(f"DEBUG: Tensor min: {tensor.min():.3f}, max: {tensor.max():.3f}")
+        
+        return tensor
+        
+    except Exception as e:
+        print(f"ERROR in pil_to_tensor: {e}")
+        # Create a simple fallback tensor in BHWC format
+        fallback = torch.zeros(1, 512, 512, 3, dtype=torch.float32)
+        fallback[:, :, :, 0] = 1.0  # Make it red
+        print(f"DEBUG: Created fallback tensor with shape: {fallback.shape}")
+        return fallback
 
 def resize_to_megapixels(image: Image.Image, target_mpx: float = 1.62):
     """Resize image to target megapixels using Lanczos interpolation."""
