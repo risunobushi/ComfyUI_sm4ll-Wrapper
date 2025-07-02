@@ -10,14 +10,35 @@ import io
 
 def tensor_to_pil(tensor: torch.Tensor, batch_index=0):
     """Converts a ComfyUI image tensor (BCHW, float 0-1) to a PIL Image (RGB)."""
-    if tensor.ndim == 4:
+    # Handle different tensor formats
+    if tensor.ndim == 4:  # BCHW format
         tensor = tensor[batch_index]
-    # Permute CHW to HWC, scale, convert to numpy, then to PIL
-    image_np = tensor.permute(1, 2, 0).cpu().numpy()
-    image_np = (image_np * 255).astype(np.uint8)
+    elif tensor.ndim == 3 and tensor.shape[0] <= 4:  # CHW format (assume channels first if <= 4 channels)
+        pass  # Already in CHW format
+    elif tensor.ndim == 3:  # HWC format (assume channels last if > 4 channels in first dim)
+        tensor = tensor.permute(2, 0, 1)  # HWC to CHW
+    
+    # Ensure we have CHW format and permute to HWC
+    if tensor.shape[0] <= 4:  # Channels first (CHW)
+        image_np = tensor.permute(1, 2, 0).cpu().numpy()
+    else:  # Already HWC
+        image_np = tensor.cpu().numpy()
+    
+    # Scale to 0-255 and convert to uint8
+    image_np = np.clip(image_np * 255.0, 0, 255).astype(np.uint8)
+    
+    # Handle grayscale
     if image_np.shape[2] == 1:  # Grayscale tensor
         return Image.fromarray(image_np.squeeze(), 'L').convert('RGB')
-    return Image.fromarray(image_np, 'RGB')
+    
+    # Handle RGB/RGBA
+    if image_np.shape[2] == 3:
+        return Image.fromarray(image_np, 'RGB')
+    elif image_np.shape[2] == 4:
+        return Image.fromarray(image_np, 'RGBA').convert('RGB')
+    else:
+        # Fallback: use first 3 channels
+        return Image.fromarray(image_np[:, :, :3], 'RGB')
 
 def pil_to_tensor(pil_image: Image.Image):
     """Converts a PIL Image to a ComfyUI image tensor (BCHW, float 0-1)."""
@@ -280,6 +301,15 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                             event_type = line[7:]
                             if event_type != 'heartbeat':  # Don't log heartbeats
                                 print(f"  🎯 Event: {event_type}")
+                                
+                                # Handle error events
+                                if event_type == 'error':
+                                    print(f"  ❌ API returned error event - this usually means:")
+                                    print(f"     - Images are invalid format/size")
+                                    print(f"     - Server is overloaded")
+                                    print(f"     - Model choice is invalid")
+                                    print(f"     - Images are too large/small for the model")
+                                    return None
                         
                         # Connection heartbeat
                         elif line.startswith('id: ') or line.startswith('retry: '):
@@ -363,12 +393,22 @@ class VTONAPINode:
             # Clean up the URL
             base_url = gradio_space_url.strip().rstrip('/')
             
+            # Debug tensor shapes
+            print(f"Input base tensor shape: {base_person_image.shape}")
+            print(f"Input product tensor shape: {product_image.shape}")
+            
             # Convert tensors to PIL images
             base_pil = tensor_to_pil(base_person_image)
             product_pil = tensor_to_pil(product_image)
             
-            print(f"Original base image size: {base_pil.size}")
-            print(f"Original product image size: {product_pil.size}")
+            print(f"Converted base image size: {base_pil.size}")
+            print(f"Converted product image size: {product_pil.size}")
+            
+            # Validate minimum size requirements
+            if base_pil.size[0] < 100 or base_pil.size[1] < 100:
+                raise Exception(f"Base image too small: {base_pil.size}. Minimum 100x100 required.")
+            if product_pil.size[0] < 100 or product_pil.size[1] < 100:
+                raise Exception(f"Product image too small: {product_pil.size}. Minimum 100x100 required.")
             
             # Resize images to 1.62mpx using Lanczos interpolation
             base_resized = resize_to_megapixels(base_pil, 1.62)
@@ -376,6 +416,25 @@ class VTONAPINode:
             
             print(f"Resized base image size: {base_resized.size}")
             print(f"Resized product image size: {product_resized.size}")
+            
+            # Ensure images are RGB (sometimes they come as RGBA or other formats)
+            if base_resized.mode != 'RGB':
+                print(f"Converting base image from {base_resized.mode} to RGB")
+                base_resized = base_resized.convert('RGB')
+            if product_resized.mode != 'RGB':
+                print(f"Converting product image from {product_resized.mode} to RGB")
+                product_resized = product_resized.convert('RGB')
+                
+            # Validate aspect ratio (VTON models usually expect reasonable aspect ratios)  
+            base_aspect = base_resized.size[0] / base_resized.size[1]
+            product_aspect = product_resized.size[0] / product_resized.size[1]
+            print(f"Base image aspect ratio: {base_aspect:.2f}")
+            print(f"Product image aspect ratio: {product_aspect:.2f}")
+            
+            if base_aspect < 0.3 or base_aspect > 3.0:
+                print(f"⚠️  Warning: Base image has extreme aspect ratio: {base_aspect:.2f}")
+            if product_aspect < 0.3 or product_aspect > 3.0:
+                print(f"⚠️  Warning: Product image has extreme aspect ratio: {product_aspect:.2f}")
             
             # Create a session to maintain cookies/state
             session = requests.Session()
@@ -416,8 +475,10 @@ class VTONAPINode:
         except Exception as e:
             print(f"Error in VTON API processing: {e}")
             # Return a red placeholder image in case of error
-            placeholder = Image.new('RGB', (512, 512), color='red')
-            return (pil_to_tensor(placeholder),)
+            placeholder = Image.new('RGB', (512, 512), color=(255, 0, 0))
+            placeholder_tensor = pil_to_tensor(placeholder)
+            print(f"Created error placeholder with shape: {placeholder_tensor.shape}")
+            return (placeholder_tensor,)
 
 NODE_CLASS_MAPPINGS = {
     "VTONAPINode": VTONAPINode
