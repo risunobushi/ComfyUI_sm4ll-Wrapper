@@ -105,6 +105,53 @@ def pil_to_tensor(pil_image: Image.Image):
         print(f"DEBUG: Created fallback tensor with shape: {fallback.shape}")
         return fallback
 
+def mask_to_pil(mask_tensor: torch.Tensor):
+    """Convert ComfyUI mask tensor to PIL B&W image."""
+    try:
+        # Ensure tensor is on CPU and detached
+        mask_tensor = mask_tensor.detach().cpu()
+        
+        print(f"DEBUG: Input mask tensor shape: {mask_tensor.shape}, dtype: {mask_tensor.dtype}")
+        print(f"DEBUG: Mask min: {mask_tensor.min():.3f}, max: {mask_tensor.max():.3f}")
+        
+        # Handle batch dimension if present
+        if mask_tensor.ndim == 3:  # BMH format (Batch, Mask, Height) - remove batch
+            mask_tensor = mask_tensor[0]
+        elif mask_tensor.ndim == 4:  # BMHW format - remove batch and take first channel
+            mask_tensor = mask_tensor[0, 0]
+        elif mask_tensor.ndim == 2:  # HW format - already correct
+            pass
+        else:
+            # Try to squeeze out single dimensions
+            mask_tensor = mask_tensor.squeeze()
+        
+        # Convert to numpy
+        mask_np = mask_tensor.numpy()
+        print(f"DEBUG: Mask numpy shape: {mask_np.shape}")
+        
+        # Ensure 2D array (Height, Width)
+        if mask_np.ndim != 2:
+            raise ValueError(f"Expected 2D mask, got shape: {mask_np.shape}")
+        
+        # Convert to 0-255 range
+        if mask_np.max() <= 1.0:
+            mask_np = mask_np * 255.0
+        
+        # Convert to uint8
+        mask_np = np.clip(mask_np, 0, 255).astype(np.uint8)
+        
+        # Create PIL image in grayscale mode (B&W)
+        mask_pil = Image.fromarray(mask_np, 'L')
+        print(f"DEBUG: Created mask PIL image: {mask_pil.size}, mode: {mask_pil.mode}")
+        
+        return mask_pil
+        
+    except Exception as e:
+        print(f"ERROR in mask_to_pil: {e}")
+        print(f"Mask tensor shape: {mask_tensor.shape}, dtype: {mask_tensor.dtype}")
+        # Create a fallback white mask
+        return Image.new('L', (512, 512), color=255)
+
 def resize_to_megapixels(image: Image.Image, target_mpx: float = 1.62):
     """Resize image to target megapixels using Lanczos interpolation."""
     current_pixels = image.width * image.height
@@ -451,7 +498,7 @@ class VTONAPINode:
                 "model_choice": (["eyewear", "footwear", "full-body"], {"default": "eyewear"}),
             },
             "optional": {
-                "mask_image": ("IMAGE",),  # NEW: Optional mask input
+                "mask_image": ("MASK",),  # Optional mask input (MASK type)
             }
         }
     
@@ -467,6 +514,8 @@ class VTONAPINode:
             # Debug tensor shapes
             print(f"Input base tensor shape: {base_person_image.shape}")
             print(f"Input product tensor shape: {product_image.shape}")
+            if mask_image is not None:
+                print(f"Input mask tensor shape: {mask_image.shape}")
             
             # Convert tensors to PIL images
             base_pil = tensor_to_pil(base_person_image)
@@ -528,9 +577,9 @@ class VTONAPINode:
             if mask_image is not None:
                 print("Processing and uploading mask image...")
                 
-                # Convert mask tensor to PIL image
-                mask_pil = tensor_to_pil(mask_image)
-                print(f"Mask image size: {mask_pil.size}")
+                # Convert MASK tensor to B&W PIL image
+                mask_pil = mask_to_pil(mask_image)
+                print(f"Mask B&W image size: {mask_pil.size}, mode: {mask_pil.mode}")
                 
                 # Validate minimum size requirements for mask
                 if mask_pil.size[0] < 100 or mask_pil.size[1] < 100:
@@ -538,15 +587,14 @@ class VTONAPINode:
                 
                 # Resize mask to same target as other images
                 mask_resized = resize_to_megapixels(mask_pil, 1.62)
-                print(f"Resized mask image size: {mask_resized.size}")
+                print(f"Resized mask B&W image size: {mask_resized.size}")
                 
-                # Ensure mask is RGB (ComfyUI masks might be grayscale)
-                if mask_resized.mode != 'RGB':
-                    print(f"Converting mask from {mask_resized.mode} to RGB")
-                    mask_resized = mask_resized.convert('RGB')
+                # Convert B&W mask to RGB for API upload (API expects IMAGE format)
+                mask_resized_rgb = mask_resized.convert('RGB')
+                print(f"Converted mask from {mask_resized.mode} to {mask_resized_rgb.mode} for API")
                 
-                # Upload mask to Gradio
-                mask_file_path = upload_to_gradio_session(mask_resized, base_url, session)
+                # Upload mask as RGB image to Gradio
+                mask_file_path = upload_to_gradio_session(mask_resized_rgb, base_url, session)
                 
                 if not mask_file_path:
                     raise Exception("Failed to upload mask image to Gradio space")
