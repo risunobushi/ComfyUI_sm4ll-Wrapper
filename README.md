@@ -1,18 +1,5 @@
 # ComfyUI_sm4ll-Wrapper
 A wrapper node for sm4ll-VTON models: https://huggingface.co/spaces/sm4ll-VTON/sm4ll-VTON-Demo
-
-# ComfyUI VTON API Node
-
-A ComfyUI custom node that integrates with the sm4ll-VTON API for virtual try-on functionality.
-
-## Features
-
-- **Virtual Try-On**: Generate realistic virtual try-on images using AI
-- **Multiple Models**: Support for eyewear, footwear, and full-body garments
-- **Smart Image Processing**: Automatic resize to 1.62 megapixels using Lanczos interpolation
-- **Direct Integration**: Seamlessly upload images to Gradio space and retrieve results
-- **Error Handling**: Robust error handling with fallback placeholder images
-
 ## Installation
 
 1. Clone or download this repository to your ComfyUI custom nodes directory:
@@ -31,14 +18,14 @@ A ComfyUI custom node that integrates with the sm4ll-VTON API for virtual try-on
 
 ## Usage
 
-1. **Add the Node**: In ComfyUI, look for "VTON API Node" in the `sm4ll/VTON` category
+1. **Add the Node**: In ComfyUI, look for "sm4ll Wrapper Sampler" in the `sm4ll/VTON` category
 
 2. **Configure Inputs**:
    - **base_person_image**: The person/model image (required)
    - **product_image**: The garment/product to try on (required)  
    - **model_choice**: Select from "eyewear", "footwear", or "full-body" (required)
-   - **gradio_space_url**: The Gradio space URL (optional, defaults to sm4ll-VTON demo)
-
+   - **(optional) mask_image**: if you don't trust the automasking feature, provide a mask drawn where the product should appear on the person
+     
 3. **Connect Output**: The node outputs a processed IMAGE that can be connected to other nodes
 
 ## How It Works
@@ -76,5 +63,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Credits
 
-- Built for the [sm4ll-VTON](https://huggingface.co/spaces/sm4ll-VTON/sm4ll-VTON-Demo) AI model
-- Compatible with ComfyUI custom node architecture 
+- Built for the [sm4ll-VTON](https://huggingface.co/spaces/sm4ll-VTON/sm4ll-VTON-Demo) family of models
