@@ -1,5 +1,8 @@
 # ComfyUI_sm4ll-Wrapper
 A wrapper node for sm4ll-VTON models: https://huggingface.co/spaces/sm4ll-VTON/sm4ll-VTON-Demo
+
+![image](https://github.com/user-attachments/assets/8c08b4fd-a9a6-42ef-a9b8-ec577ac9f0b7)
+
 ## Installation
 
 1. Clone or download this repository to your ComfyUI custom nodes directory:
