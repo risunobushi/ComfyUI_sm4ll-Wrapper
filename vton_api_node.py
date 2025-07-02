@@ -254,41 +254,23 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
     api_model_choice = model_mapping.get(model_choice, model_choice)
     print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}")
     
-    # All models support masks - determine API structure based on mask availability
+    # All models use 4-parameter structure: [base, product, model, mask]
+    # Use user-provided mask if available, otherwise use base image as fallback
+    mask_to_use = mask_file_path if mask_file_path else base_file_path
+    
+    api_data = {
+        "data": [
+            {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
+            {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
+            api_model_choice,
+            {"path": mask_to_use, "meta": {"_type": "gradio.FileData"}}
+        ]
+    }
+    
     if mask_file_path:
-        # 4-parameter structure with mask: [base, product, model, mask]
-        api_data = {
-            "data": [
-                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
-                {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-                api_model_choice,
-                {"path": mask_file_path, "meta": {"_type": "gradio.FileData"}}
-            ]
-        }
         print(f"  🎭 Including user-provided mask in API call: {mask_file_path}")
-    
-    elif api_model_choice == "dress":
-        # Dress model requires a mask - use base image as fallback when no mask provided
-        api_data = {
-            "data": [
-                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
-                {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-                api_model_choice,
-                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}}
-            ]
-        }
-        print(f"  🎭 No mask provided - using base image as fallback mask for dress model")
-    
     else:
-        # Eyewear/Footwear models without mask: [base, product, model]
-        api_data = {
-            "data": [
-                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
-                {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-                api_model_choice
-            ]
-        }
-        print(f"  🎭 {api_model_choice} model - no mask provided, using 3-parameter structure")
+        print(f"  🎭 No mask provided - using base image as fallback mask for {api_model_choice} model")
     
     print(f"  📤 API request data: {api_data}")
     
