@@ -255,22 +255,22 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
     print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}")
     
     # Gradio API always expects 4 parameters: [base, product, model, mask]
-    # Use user-provided mask if available, otherwise use base image as fallback
-    mask_to_use = mask_file_path if mask_file_path else base_file_path
+    # Use user-provided mask if available, otherwise pass null for backend fallback
+    if mask_file_path:
+        mask_parameter = {"path": mask_file_path, "meta": {"_type": "gradio.FileData"}}
+        print(f"  🎭 Including user-provided mask in API call: {mask_file_path}")
+    else:
+        mask_parameter = None
+        print(f"  🎭 No mask provided - sending null (backend will use base image fallback with default workflow)")
     
     api_data = {
         "data": [
             {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
             {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
             api_model_choice,
-            {"path": mask_to_use, "meta": {"_type": "gradio.FileData"}}
+            mask_parameter
         ]
     }
-    
-    if mask_file_path:
-        print(f"  🎭 Including user-provided mask in API call: {mask_file_path}")
-    else:
-        print(f"  🎭 No mask provided - using base image as fallback mask (Gradio backend will handle workflow selection)")
     
     print(f"  📤 API request data: {api_data}")
     
