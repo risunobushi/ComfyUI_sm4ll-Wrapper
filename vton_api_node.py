@@ -249,7 +249,8 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
     model_mapping = {
         "eyewear": "eyewear",
         "footwear": "footwear", 
-        "full-body": "dress"  # API expects "dress" for full-body garments
+        "full-body": "dress",  # API expects "dress" for full-body garments
+        "top garment": "top"   # API expects "top" for top garments
     }
     
     api_model_choice = model_mapping.get(model_choice, model_choice)
@@ -498,7 +499,7 @@ class VTONAPINode:
             "required": {
                 "base_person_image": ("IMAGE",),
                 "product_image": ("IMAGE",),
-                "model_choice": (["eyewear", "footwear", "full-body"], {"default": "eyewear"}),
+                "model_choice": (["eyewear", "footwear", "full-body", "top garment"], {"default": "eyewear"}),
 
             },
                          "optional": {
