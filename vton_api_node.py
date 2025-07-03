@@ -500,7 +500,7 @@ class VTONAPINode:
                 "model_choice": (["eyewear", "footwear", "full-body"], {"default": "eyewear"}),
             },
                          "optional": {
-                "mask_image": ("MASK",),  # Optional mask input (MASK type)
+                "base_person_mask": ("MASK",),  # Optional mask input (MASK type)
              }
         }
     
@@ -508,7 +508,10 @@ class VTONAPINode:
     FUNCTION = "process_vton"
     CATEGORY = "sm4ll/VTON"
     
-    def process_vton(self, base_person_image, product_image, model_choice, mask_image=None):
+    # Disable caching - always execute even with same inputs
+    NOT_IDEMPOTENT = True
+    
+    def process_vton(self, base_person_image, product_image, model_choice, base_person_mask=None):
         try:
             # Use the hardcoded Gradio space URL
             base_url = "https://sm4ll-vton-sm4ll-vton-demo.hf.space"
@@ -574,12 +577,12 @@ class VTONAPINode:
             
             # Handle optional mask image
             mask_file_path = None
-            if mask_image is not None:
+            if base_person_mask is not None:
                 print("Processing and uploading mask image...")
-                print(f"Input mask tensor shape: {mask_image.shape}")
+                print(f"Input mask tensor shape: {base_person_mask.shape}")
                 
                 # Convert MASK tensor to B&W PIL image
-                mask_pil = mask_to_pil(mask_image)
+                mask_pil = mask_to_pil(base_person_mask)
                 print(f"Mask B&W image size: {mask_pil.size}, mode: {mask_pil.mode}")
                 
                 # Validate minimum size requirements for mask
