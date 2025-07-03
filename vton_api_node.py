@@ -519,15 +519,22 @@ class VTONAPINode:
             cache_buster = time.time() + random.random()
             print(f"🎲 Internal cache-buster: {cache_buster:.6f} (ensures fresh execution)")
             
+            # Add imperceptible noise to force different input hash (ComfyUI cache bypass)
+            # This is tiny enough to not affect the visual result but changes the tensor hash
+            noise_scale = 1e-6  # Extremely small noise
+            noise = torch.randn_like(base_person_image) * noise_scale
+            base_person_image_noisy = base_person_image + noise
+            print(f"🔄 Added imperceptible noise (scale: {noise_scale}) to bypass ComfyUI caching")
+            
             # Use the hardcoded Gradio space URL
             base_url = "https://sm4ll-vton-sm4ll-vton-demo.hf.space"
             
             # Debug tensor shapes
-            print(f"Input base tensor shape: {base_person_image.shape}")
+            print(f"Input base tensor shape: {base_person_image_noisy.shape}")
             print(f"Input product tensor shape: {product_image.shape}")
             
-            # Convert tensors to PIL images
-            base_pil = tensor_to_pil(base_person_image)
+            # Convert tensors to PIL images (use the slightly modified base image)
+            base_pil = tensor_to_pil(base_person_image_noisy)
             product_pil = tensor_to_pil(product_image)
             
             print(f"Converted base image size: {base_pil.size}")
