@@ -7,6 +7,7 @@ import time
 import json
 import math
 import io
+import random
 
 def tensor_to_pil(tensor: torch.Tensor, batch_index=0):
     """Converts a ComfyUI image tensor to a PIL Image (RGB)."""
@@ -498,6 +499,7 @@ class VTONAPINode:
                 "base_person_image": ("IMAGE",),
                 "product_image": ("IMAGE",),
                 "model_choice": (["eyewear", "footwear", "full-body"], {"default": "eyewear"}),
+
             },
                          "optional": {
                 "base_person_mask": ("MASK",),  # Optional mask input (MASK type)
@@ -513,6 +515,10 @@ class VTONAPINode:
     
     def process_vton(self, base_person_image, product_image, model_choice, base_person_mask=None):
         try:
+            # Generate internal cache-buster to force re-execution
+            cache_buster = time.time() + random.random()
+            print(f"🎲 Internal cache-buster: {cache_buster:.6f} (ensures fresh execution)")
+            
             # Use the hardcoded Gradio space URL
             base_url = "https://sm4ll-vton-sm4ll-vton-demo.hf.space"
             
