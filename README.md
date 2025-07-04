@@ -8,7 +8,7 @@ A wrapper node for sm4ll-VTON models: https://huggingface.co/spaces/sm4ll-VTON/s
 1. Clone or download this repository to your ComfyUI custom nodes directory:
    ```bash
    cd ComfyUI/custom_nodes/
-   git clone https://github.com/your-repo/ComfyUI_sm4ll-Wrapper.git
+   git clone https://github.com/risunobushi/ComfyUI_sm4ll-Wrapper.git
    ```
 
 2. Install the required dependencies:
