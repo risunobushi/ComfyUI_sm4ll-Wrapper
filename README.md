@@ -93,7 +93,7 @@ To use the **Paid API** node, you need a YourMirror API key:
 - **Non-Commercial License**: Demo image outputs are subjected to a non-commercial license. Check the Terms and Conditions on [studio.yourmirror.io](https://studio.yourmirror.io) for more details.
 
 ### Paid API
-- **Cost**: $0.10 per API call
+- **Cost**: $0.05 per API call
 - **Rate Limits**: 1000 requests per hour per API key
 - **Processing**: Separate queue, separate endpoints for each sm4ll model
 - **Billing**: Automatic monthly billing based on actual usage
