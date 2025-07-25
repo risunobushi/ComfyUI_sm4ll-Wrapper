@@ -242,7 +242,7 @@ def upload_to_gradio_session(image, base_url, session):
     
     return None
 
-def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path=None):
+def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path=None, api_key=None):
     """Call VTON API following the exact Gradio API pattern (like curl -N)."""
     
     # Map ComfyUI model choices to API parameters
@@ -265,14 +265,20 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
         mask_parameter = None
         print(f"  🎭 No mask provided - sending null (backend will use base image fallback with default workflow)")
     
-    api_data = {
-        "data": [
-            {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
-            {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-            api_model_choice,
-            mask_parameter
-        ]
-    }
+    # Build API data array - paid API requires API key as 5th parameter
+    api_data_array = [
+        {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
+        {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
+        api_model_choice,
+        mask_parameter
+    ]
+    
+    # Add API key if provided (for paid API)
+    if api_key:
+        api_data_array.append(api_key)
+        print(f"  🔑 Using API key: {api_key[:8]}...{api_key[-4:] if len(api_key) > 12 else '[SHORT]'}")
+    
+    api_data = {"data": api_data_array}
     
     print(f"  📤 API request data: {api_data}")
     
@@ -644,10 +650,172 @@ class VTONAPINode:
             print(f"Created error placeholder with shape: {placeholder_tensor.shape}")
             return (placeholder_tensor,)
 
+class VTONAPIPaidNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "base_person_image": ("IMAGE",),
+                "product_image": ("IMAGE",),
+                "model_choice": (["eyewear", "footwear", "full-body", "top garment"], {"default": "eyewear"}),
+                "api_key": ("STRING", {"default": "ym_your_api_key_here", "multiline": False}),
+            },
+            "optional": {
+                "base_person_mask": ("MASK",),  # Optional mask input (MASK type)
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "process_vton_paid"
+    CATEGORY = "sm4ll/VTON"
+    
+    # Disable caching - always execute even with same inputs
+    NOT_IDEMPOTENT = True
+    
+    def process_vton_paid(self, base_person_image, product_image, model_choice, api_key, base_person_mask=None):
+        try:
+            # Generate internal cache-buster to force re-execution
+            cache_buster = time.time() + random.random()
+            print(f"🎲 Internal cache-buster: {cache_buster:.6f} (ensures fresh execution)")
+            
+            # Validate API key format
+            if not api_key or not api_key.strip():
+                raise Exception("API key is required for paid API access")
+            
+            api_key = api_key.strip()
+            if not api_key.startswith("ym_") or len(api_key) != 32:
+                raise Exception("Invalid API key format. Expected format: ym_29_characters")
+            
+            # Use the production API endpoint
+            base_url = "https://api.yourmirror.io"
+            
+            # Debug tensor shapes
+            print(f"Input base tensor shape: {base_person_image.shape}")
+            print(f"Input product tensor shape: {product_image.shape}")
+            
+            # Convert tensors to PIL images
+            base_pil = tensor_to_pil(base_person_image)
+            product_pil = tensor_to_pil(product_image)
+            
+            print(f"Converted base image size: {base_pil.size}")
+            print(f"Converted product image size: {product_pil.size}")
+            
+            # Validate minimum size requirements
+            if base_pil.size[0] < 100 or base_pil.size[1] < 100:
+                raise Exception(f"Base image too small: {base_pil.size}. Minimum 100x100 required.")
+            if product_pil.size[0] < 100 or product_pil.size[1] < 100:
+                raise Exception(f"Product image too small: {product_pil.size}. Minimum 100x100 required.")
+            
+            # Resize images to 1.62mpx using Lanczos interpolation
+            base_resized = resize_to_megapixels(base_pil, 1.62)
+            product_resized = resize_to_megapixels(product_pil, 1.62)
+            
+            print(f"Resized base image size: {base_resized.size}")
+            print(f"Resized product image size: {product_resized.size}")
+            
+            # Ensure images are RGB (sometimes they come as RGBA or other formats)
+            if base_resized.mode != 'RGB':
+                print(f"Converting base image from {base_resized.mode} to RGB")
+                base_resized = base_resized.convert('RGB')
+            if product_resized.mode != 'RGB':
+                print(f"Converting product image from {product_resized.mode} to RGB")
+                product_resized = product_resized.convert('RGB')
+                
+            # Validate aspect ratio (VTON models usually expect reasonable aspect ratios)  
+            base_aspect = base_resized.size[0] / base_resized.size[1]
+            product_aspect = product_resized.size[0] / product_resized.size[1]
+            print(f"Base image aspect ratio: {base_aspect:.2f}")
+            print(f"Product image aspect ratio: {product_aspect:.2f}")
+            
+            if base_aspect < 0.3 or base_aspect > 3.0:
+                print(f"⚠️  Warning: Base image has extreme aspect ratio: {base_aspect:.2f}")
+            if product_aspect < 0.3 or product_aspect > 3.0:
+                print(f"⚠️  Warning: Product image has extreme aspect ratio: {product_aspect:.2f}")
+            
+            # Create a session to maintain cookies/state
+            session = requests.Session()
+            
+            # Upload images directly to the production API
+            print("Uploading base image to production API...")
+            base_file_path = upload_to_gradio_session(base_resized, base_url, session)
+            
+            if not base_file_path:
+                raise Exception("Failed to upload base image to production API")
+            
+            print("Uploading product image to production API...")
+            product_file_path = upload_to_gradio_session(product_resized, base_url, session)
+            
+            if not product_file_path:
+                raise Exception("Failed to upload product image to production API")
+            
+            # Handle optional mask image
+            mask_file_path = None
+            if base_person_mask is not None:
+                print("Processing and uploading mask image...")
+                print(f"Input mask tensor shape: {base_person_mask.shape}")
+                
+                # Convert MASK tensor to B&W PIL image
+                mask_pil = mask_to_pil(base_person_mask)
+                print(f"Mask B&W image size: {mask_pil.size}, mode: {mask_pil.mode}")
+                
+                # Validate minimum size requirements for mask
+                if mask_pil.size[0] < 100 or mask_pil.size[1] < 100:
+                    print(f"⚠️  Warning: Mask image is very small ({mask_pil.size}), this might not work well")
+                
+                # Resize mask to same target as other images
+                mask_resized = resize_to_megapixels(mask_pil, 1.62)
+                print(f"Resized mask B&W image size: {mask_resized.size}")
+                
+                # Convert B&W mask to RGB for API upload (API expects IMAGE format)
+                mask_resized_rgb = mask_resized.convert('RGB')
+                print(f"Converted mask from {mask_resized.mode} to {mask_resized_rgb.mode} for API")
+                
+                # Upload mask as RGB image to production API
+                mask_file_path = upload_to_gradio_session(mask_resized_rgb, base_url, session)
+                
+                if not mask_file_path:
+                    raise Exception("Failed to upload mask image to production API")
+                
+                print(f"Mask image uploaded: {mask_file_path}")
+            else:
+                print("No mask image provided - will use base image fallback")
+            
+            print(f"Base image uploaded: {base_file_path}")
+            print(f"Product image uploaded: {product_file_path}")
+            if mask_file_path:
+                print(f"Mask image uploaded: {mask_file_path}")
+            
+            # Call the VTON API with API key
+            result_path_or_url = call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path, api_key)
+            
+            if not result_path_or_url:
+                raise Exception("VTON API call failed - no result returned")
+            
+            # Download the result image
+            result_image = download_result_image(result_path_or_url, base_url, session)
+            
+            if not result_image:
+                raise Exception("Failed to download result image")
+            
+            # Convert result image back to tensor
+            result_tensor = pil_to_tensor(result_image)
+            print("✓ VTON processing completed successfully!")
+            return (result_tensor,)
+            
+        except Exception as e:
+            print(f"Error in VTON API processing: {e}")
+            # Return a red placeholder image in case of error
+            placeholder = Image.new('RGB', (512, 512), color=(255, 0, 0))
+            placeholder_tensor = pil_to_tensor(placeholder)
+            print(f"Created error placeholder with shape: {placeholder_tensor.shape}")
+            return (placeholder_tensor,)
+
 NODE_CLASS_MAPPINGS = {
-    "VTONAPINode": VTONAPINode
+    "VTONAPINode": VTONAPINode,
+    "VTONAPIPaidNode": VTONAPIPaidNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "VTONAPINode": "sm4ll Wrapper Sampler"
+    "VTONAPINode": "sm4ll Wrapper Sampler - Demo Version",
+    "VTONAPIPaidNode": "sm4ll Wrapper Sampler - Paid API"
 } 
