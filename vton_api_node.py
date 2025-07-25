@@ -167,200 +167,240 @@ def resize_to_megapixels(image: Image.Image, target_mpx: float = 1.62):
     
     return image.resize((new_width, new_height), Image.Resampling.LANCZOS)
 
-def upload_to_gradio_session(image, base_url, session):
+def upload_to_gradio_session(image, base_url, session, is_paid_api=False):
     """Upload image using a session for state persistence."""
-    try:
-        # Convert image to bytes
-        img_buffer = io.BytesIO()
-        image.save(img_buffer, format='PNG')
-        img_buffer.seek(0)
+    max_retries = 3 if is_paid_api else 1
+    
+    for attempt in range(max_retries):
+        try:
+            # Convert image to bytes
+            img_buffer = io.BytesIO()
+            image.save(img_buffer, format='PNG')
+            img_buffer.seek(0)
+            
+            # Try the standard Gradio upload endpoint
+            upload_url = f"{base_url}/gradio_api/upload"
+            
+            # Prepare the file for upload
+            files = {
+                'files': ('image.png', img_buffer, 'image/png')
+            }
+            
+            retry_msg = f" (attempt {attempt + 1}/{max_retries})" if is_paid_api and attempt > 0 else ""
+            print(f"Uploading to Gradio space with session: {upload_url}{retry_msg}")
+            response = session.post(upload_url, files=files, timeout=30)
         
-        # Try the standard Gradio upload endpoint
-        upload_url = f"{base_url}/gradio_api/upload"
-        
-        # Prepare the file for upload
-        files = {
-            'files': ('image.png', img_buffer, 'image/png')
-        }
-        
-        print(f"Uploading to Gradio space with session: {upload_url}")
-        response = session.post(upload_url, files=files, timeout=30)
-        
-        if response.status_code == 200:
-            # Parse the response to get the file path/URL
-            try:
-                result = response.json()
-                print(f"Session upload response: {result}")  # Debug: show full response
-                
-                # Different Gradio versions return different formats
-                if isinstance(result, list) and len(result) > 0:
-                    file_info = result[0]
-                    print(f"Session file info: {file_info}")  # Debug: show file info
+            if response.status_code == 200:
+                # Parse the response to get the file path/URL
+                try:
+                    result = response.json()
+                    print(f"Session upload response: {result}")  # Debug: show full response
                     
-                    if isinstance(file_info, dict):
-                        # Format: [{"name": "filename", "data": "file_path", ...}]
-                        file_path = file_info.get('name') or file_info.get('data') or file_info.get('path')
+                    # Different Gradio versions return different formats
+                    if isinstance(result, list) and len(result) > 0:
+                        file_info = result[0]
+                        print(f"Session file info: {file_info}")  # Debug: show file info
+                        
+                        if isinstance(file_info, dict):
+                            # Format: [{"name": "filename", "data": "file_path", ...}]
+                            file_path = file_info.get('name') or file_info.get('data') or file_info.get('path')
+                            if file_path:
+                                full_url = f"{base_url}/file={file_path}"
+                                print(f"Session upload successful: {full_url}")
+                                return file_path  # Return the internal file path for API calls
+                        elif isinstance(file_info, str):
+                            # Format: ["/tmp/gradio/hash/filename"]
+                            file_path = file_info
+                            full_url = f"{base_url}/file={file_path}"
+                            print(f"Session upload successful: {full_url}")
+                            return file_path  # Return the internal file path for API calls
+                    elif isinstance(result, dict):
+                        # Some formats return a dict directly
+                        file_path = result.get('name') or result.get('data') or result.get('path')
                         if file_path:
                             full_url = f"{base_url}/file={file_path}"
                             print(f"Session upload successful: {full_url}")
                             return file_path  # Return the internal file path for API calls
-                    elif isinstance(file_info, str):
-                        # Format: ["/tmp/gradio/hash/filename"]
-                        file_path = file_info
+                    elif isinstance(result, str):
+                        # Try to use the raw response as filename
+                        file_path = result
                         full_url = f"{base_url}/file={file_path}"
                         print(f"Session upload successful: {full_url}")
                         return file_path  # Return the internal file path for API calls
-                elif isinstance(result, dict):
-                    # Some formats return a dict directly
-                    file_path = result.get('name') or result.get('data') or result.get('path')
+                            
+                    print(f"Unexpected session upload response format: {result}")
+                    
+                except json.JSONDecodeError:
+                    # Sometimes the response is just a filename string
+                    print(f"Session JSON decode failed, raw response: '{response.text}'")  # Debug
+                    file_path = response.text.strip().strip('"')
                     if file_path:
                         full_url = f"{base_url}/file={file_path}"
                         print(f"Session upload successful: {full_url}")
                         return file_path  # Return the internal file path for API calls
-                elif isinstance(result, str):
-                    # Try to use the raw response as filename
-                    file_path = result
-                    full_url = f"{base_url}/file={file_path}"
-                    print(f"Session upload successful: {full_url}")
-                    return file_path  # Return the internal file path for API calls
-                        
-                print(f"Unexpected session upload response format: {result}")
-                
-            except json.JSONDecodeError:
-                # Sometimes the response is just a filename string
-                print(f"Session JSON decode failed, raw response: '{response.text}'")  # Debug
-                file_path = response.text.strip().strip('"')
-                if file_path:
-                    full_url = f"{base_url}/file={file_path}"
-                    print(f"Session upload successful: {full_url}")
-                    return file_path  # Return the internal file path for API calls
-        else:
-            print(f"Session upload failed with status {response.status_code}: {response.text}")
+            else:
+                print(f"Session upload failed with status {response.status_code}: {response.text}")
+                if is_paid_api and attempt < max_retries - 1:
+                    print(f"Retrying upload in 2 seconds... ({attempt + 1}/{max_retries})")
+                    time.sleep(2)
+                    continue
+            
+        except Exception as e:
+            print(f"Error in session upload to Gradio space: {e}")
+            if is_paid_api and attempt < max_retries - 1:
+                print(f"Retrying upload in 2 seconds... ({attempt + 1}/{max_retries})")
+                time.sleep(2)
+                continue
         
-    except Exception as e:
-        print(f"Error in session upload to Gradio space: {e}")
+        # If we get here and it's not a retry scenario, break
+        if not is_paid_api:
+            break
     
     return None
 
 def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path=None, api_key=None):
     """Call VTON API following the exact Gradio API pattern (like curl -N)."""
+    is_paid_api = api_key is not None
+    max_retries = 3 if is_paid_api else 1
     
-    # Map ComfyUI model choices to API parameters
-    model_mapping = {
-        "eyewear": "eyewear",
-        "footwear": "footwear", 
-        "full-body": "dress",  # API expects "dress" for full-body garments
-        "top garment": "top"   # API expects "top" for top garments
-    }
-    
-    api_model_choice = model_mapping.get(model_choice, model_choice)
-    print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}")
-    
-    # Gradio API always expects 4 parameters: [base, product, model, mask]
-    # Use user-provided mask if available, otherwise pass null for backend fallback
-    if mask_file_path:
-        mask_parameter = {"path": mask_file_path, "meta": {"_type": "gradio.FileData"}}
-        print(f"  🎭 Including user-provided mask in API call: {mask_file_path}")
-    else:
-        mask_parameter = None
-        print(f"  🎭 No mask provided - sending null (backend will use base image fallback with default workflow)")
-    
-    # Build API data array - paid API requires API key as 5th parameter
-    api_data_array = [
-        {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
-        {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
-        api_model_choice,
-        mask_parameter
-    ]
-    
-    # Add API key if provided (for paid API)
-    if api_key:
-        api_data_array.append(api_key)
-        print(f"  🔑 Using API key: {api_key[:8]}...{api_key[-4:] if len(api_key) > 12 else '[SHORT]'}")
-    
-    api_data = {"data": api_data_array}
-    
-    print(f"  📤 API request data: {api_data}")
-    
-    try:
-        # Step 1: POST to get EVENT_ID (exactly like the YAML example)
-        submit_url = f"{base_url}/gradio_api/call/generate"
-        print(f"  🚀 Submitting job to: {submit_url}")
-        
-        response = session.post(
-            submit_url,
-            json=api_data,
-            headers={"Content-Type": "application/json"},
-            timeout=30
-        )
-        
-        print(f"  📨 Submit response: {response.text}")
-        
-        if response.status_code != 200:
-            print(f"  ❌ API submit failed: {response.status_code}")
-            return None
-        
-        # Extract EVENT_ID (like awk -F'"' '{ print $4}' in the YAML)
+    for attempt in range(max_retries):
         try:
-            event_data = response.json()
-            event_id = event_data.get('event_id')
-            if not event_id:
-                print(f"  ❌ No event_id in response: {event_data}")
-                return None
-        except:
-            print(f"  ❌ Failed to parse event_id from response")
-            return None
+            # Map ComfyUI model choices to API parameters
+            model_mapping = {
+                "eyewear": "eyewear",
+                "footwear": "footwear", 
+                "full-body": "dress",  # API expects "dress" for full-body garments
+                "top garment": "top"   # API expects "top" for top garments
+            }
             
-        print(f"  ✅ Got EVENT_ID: {event_id}")
+            api_model_choice = model_mapping.get(model_choice, model_choice)
+            retry_msg = f" (attempt {attempt + 1}/{max_retries})" if is_paid_api and attempt > 0 else ""
+            print(f"\n🎨 Calling VTON API with model: {model_choice} → {api_model_choice}{retry_msg}")
+            
+            # Gradio API always expects 4 parameters: [base, product, model, mask]
+            # Use user-provided mask if available, otherwise pass null for backend fallback
+            if mask_file_path:
+                mask_parameter = {"path": mask_file_path, "meta": {"_type": "gradio.FileData"}}
+                print(f"  🎭 Including user-provided mask in API call: {mask_file_path}")
+            else:
+                mask_parameter = None
+                print(f"  🎭 No mask provided - sending null (backend will use base image fallback with default workflow)")
+            
+            # Build API data array - paid API requires API key as 5th parameter
+            api_data_array = [
+                {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
+                {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
+                api_model_choice,
+                mask_parameter
+            ]
+            
+            # Add API key if provided (for paid API)
+            if api_key:
+                api_data_array.append(api_key)
+                print(f"  🔑 Using API key: {api_key[:8]}...{api_key[-4:] if len(api_key) > 12 else '[SHORT]'}")
+            
+            api_data = {"data": api_data_array}
+            
+            print(f"  📤 API request data: {api_data}")
+            
+            # Step 1: POST to get EVENT_ID (exactly like the YAML example)
+            submit_url = f"{base_url}/gradio_api/call/generate"
+            print(f"  🚀 Submitting job to: {submit_url}")
+            
+            response = session.post(
+                submit_url,
+                json=api_data,
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            
+            print(f"  📨 Submit response: {response.text}")
+            
+            if response.status_code != 200:
+                print(f"  ❌ API submit failed: {response.status_code}")
+                if is_paid_api and attempt < max_retries - 1:
+                    print(f"  🔄 Retrying API call in 3 seconds... ({attempt + 1}/{max_retries})")
+                    time.sleep(3)
+                    continue
+                else:
+                    return None
         
-        # Step 2: GET with streaming (equivalent to curl -N)
-        stream_url = f"{base_url}/gradio_api/call/generate/{event_id}"
-        print(f"  🌊 Starting SSE stream: {stream_url}")
-        print(f"     (equivalent to: curl -N {stream_url})")
-        
-        # Make streaming request exactly like curl -N
-        stream_response = session.get(
-            stream_url,
-            headers={
-                'Accept': 'text/event-stream',
-                'Cache-Control': 'no-cache',
-                'Connection': 'keep-alive'
-            },
-            timeout=300,  # 5 minutes for AI processing
-            stream=True
-        )
-        
-        if stream_response.status_code != 200:
-            print(f"  ❌ Stream failed: {stream_response.status_code}")
-            print(f"  📄 Response: {stream_response.text[:200]}")
-            return None
-        
-        print(f"  ✅ SSE stream connected (status: {stream_response.status_code})")
-        
-        # Process streaming response line by line (like curl -N output)
-        buffer = ""
-        start_time = time.time()
-        
-        for chunk in stream_response.iter_content(chunk_size=1, decode_unicode=True):
-            if chunk:
-                buffer += chunk
-                
-                # Process complete lines
-                while '\n' in buffer:
-                    line, buffer = buffer.split('\n', 1)
-                    line = line.strip()
+            # Extract EVENT_ID (like awk -F'"' '{ print $4}' in the YAML)
+            try:
+                event_data = response.json()
+                event_id = event_data.get('event_id')
+                if not event_id:
+                    print(f"  ❌ No event_id in response: {event_data}")
+                    if is_paid_api and attempt < max_retries - 1:
+                        print(f"  🔄 Retrying API call in 3 seconds... ({attempt + 1}/{max_retries})")
+                        time.sleep(3)
+                        continue
+                    else:
+                        return None
+            except:
+                print(f"  ❌ Failed to parse event_id from response")
+                if is_paid_api and attempt < max_retries - 1:
+                    print(f"  🔄 Retrying API call in 3 seconds... ({attempt + 1}/{max_retries})")
+                    time.sleep(3)
+                    continue
+                else:
+                    return None
+            
+            print(f"  ✅ Got EVENT_ID: {event_id}")
+            
+            # Step 2: GET with streaming (equivalent to curl -N)
+            stream_url = f"{base_url}/gradio_api/call/generate/{event_id}"
+            print(f"  🌊 Starting SSE stream: {stream_url}")
+            print(f"     (equivalent to: curl -N {stream_url})")
+            
+            # Make streaming request exactly like curl -N
+            stream_response = session.get(
+                stream_url,
+                headers={
+                    'Accept': 'text/event-stream',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive'
+                },
+                timeout=300,  # 5 minutes for AI processing
+                stream=True
+            )
+            
+            if stream_response.status_code != 200:
+                print(f"  ❌ Stream failed: {stream_response.status_code}")
+                print(f"  📄 Response: {stream_response.text[:200]}")
+                if is_paid_api and attempt < max_retries - 1:
+                    print(f"  🔄 Retrying API call in 3 seconds... ({attempt + 1}/{max_retries})")
+                    time.sleep(3)
+                    continue
+                else:
+                    return None
+            
+            print(f"  ✅ SSE stream connected (status: {stream_response.status_code})")
+            
+            # Process streaming response line by line (like curl -N output)
+            buffer = ""
+            start_time = time.time()
+            
+            for chunk in stream_response.iter_content(chunk_size=1, decode_unicode=True):
+                if chunk:
+                    buffer += chunk
                     
-                    if line:
-                        elapsed = time.time() - start_time
-                        print(f"  📡 [{elapsed:.1f}s] {line}")
+                    # Process complete lines
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
                         
-                        # Handle SSE data lines
-                        if line.startswith('data: '):
-                            data_content = line[6:]  # Remove 'data: ' prefix
-                            
-                            # Skip empty data
-                            if not data_content or data_content == '{}':
-                                continue
+                        if line:
+                            elapsed = time.time() - start_time
+                            print(f"  📡 [{elapsed:.1f}s] {line}")
+                        
+                            # Handle SSE data lines
+                            if line.startswith('data: '):
+                                data_content = line[6:]  # Remove 'data: ' prefix
+                                
+                                # Skip empty data
+                                if not data_content or data_content == '{}':
+                                    continue
                             
                             try:
                                 # Parse JSON data
@@ -443,17 +483,30 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                         elif line.startswith('id: ') or line.startswith('retry: '):
                             continue  # Skip SSE metadata
                 
-                # Timeout check
-                if time.time() - start_time > 300:  # 5 minutes
-                    print(f"  ⏰ Stream timeout after 5 minutes")
-                    break
+                    # Timeout check
+                    if time.time() - start_time > 300:  # 5 minutes
+                        print(f"  ⏰ Stream timeout after 5 minutes")
+                        break
         
-        print(f"  🔚 Stream ended without result")
-        return None
-        
-    except Exception as e:
-        print(f"  ❌ API error: {e}")
-        return None
+            print(f"  🔚 Stream ended without result")
+            # If this is a paid API and we have retries left, try again
+            if is_paid_api and attempt < max_retries - 1:
+                print(f"  🔄 Retrying API call in 3 seconds... ({attempt + 1}/{max_retries})")
+                time.sleep(3)
+                continue
+            else:
+                return None
+            
+        except Exception as e:
+            print(f"  ❌ API error: {e}")
+            if is_paid_api and attempt < max_retries - 1:
+                print(f"  🔄 Retrying API call in 3 seconds... ({attempt + 1}/{max_retries})")
+                time.sleep(3)
+                continue
+            else:
+                return None
+    
+    return None
 
 def download_result_image(result_path_or_url, base_url, session):
     """Download the result image from Gradio."""
@@ -737,13 +790,13 @@ class VTONAPIPaidNode:
             
             # Upload images directly to the production API
             print("Uploading base image to production API...")
-            base_file_path = upload_to_gradio_session(base_resized, base_url, session)
+            base_file_path = upload_to_gradio_session(base_resized, base_url, session, is_paid_api=True)
             
             if not base_file_path:
                 raise Exception("Failed to upload base image to production API")
             
             print("Uploading product image to production API...")
-            product_file_path = upload_to_gradio_session(product_resized, base_url, session)
+            product_file_path = upload_to_gradio_session(product_resized, base_url, session, is_paid_api=True)
             
             if not product_file_path:
                 raise Exception("Failed to upload product image to production API")
@@ -771,7 +824,7 @@ class VTONAPIPaidNode:
                 print(f"Converted mask from {mask_resized.mode} to {mask_resized_rgb.mode} for API")
                 
                 # Upload mask as RGB image to production API
-                mask_file_path = upload_to_gradio_session(mask_resized_rgb, base_url, session)
+                mask_file_path = upload_to_gradio_session(mask_resized_rgb, base_url, session, is_paid_api=True)
                 
                 if not mask_file_path:
                     raise Exception("Failed to upload mask image to production API")
