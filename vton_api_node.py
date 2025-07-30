@@ -398,6 +398,9 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                             elapsed = time.time() - start_time
                             print(f"  📡 [{elapsed:.1f}s] {line}")
                         
+                            # Initialize data_content to avoid scoping issues
+                            data_content = None
+                            
                             # Handle SSE data lines
                             if line.startswith('data: '):
                                 data_content = line[6:]  # Remove 'data: ' prefix
@@ -407,8 +410,8 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                                     continue
                             
                             try:
-                                # Parse JSON data
-                                if data_content.startswith('{') or data_content.startswith('['):
+                                # Parse JSON data only if we have data_content
+                                if data_content and (data_content.startswith('{') or data_content.startswith('[')):
                                     result_data = json.loads(data_content)
                                     
                                     if isinstance(result_data, dict):
@@ -455,17 +458,17 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                                             return first_item
                                 
                                 # Handle direct string responses (file paths)
-                                elif data_content.startswith('/') or data_content.startswith('"/"'):
+                                elif data_content and (data_content.startswith('/') or data_content.startswith('"/')):
                                     result_path = data_content.strip('"')
                                     print(f"  ✅ COMPLETED! Result: {result_path}")
                                     return result_path
                                 
                             except json.JSONDecodeError:
                                 # Try to extract file path from non-JSON data
-                                if data_content.startswith('/'):
+                                if data_content and data_content.startswith('/'):
                                     print(f"  ✅ COMPLETED! Result: {data_content}")
                                     return data_content
-                                else:
+                                elif data_content:
                                     print(f"  📝 Raw data: {data_content}")
                         
                         # Handle other SSE lines
