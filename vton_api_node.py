@@ -258,7 +258,7 @@ def upload_to_gradio_session(image, base_url, session, is_paid_api=False):
     
     return None
 
-def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path=None, api_key=None):
+def call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path=None, api_key=None, quality="normal"):
     """Call VTON API following the exact Gradio API pattern (like curl -N)."""
     is_paid_api = api_key is not None
     max_retries = 3 if is_paid_api else 1
@@ -286,7 +286,7 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                 mask_parameter = None
                 print(f"  🎭 No mask provided - sending null (backend will use base image fallback with default workflow)")
             
-            # Build API data array - paid API requires API key as 5th parameter
+            # Build API data array
             api_data_array = [
                 {"path": base_file_path, "meta": {"_type": "gradio.FileData"}},
                 {"path": product_file_path, "meta": {"_type": "gradio.FileData"}},
@@ -294,10 +294,14 @@ def call_vton_api(base_file_path, product_file_path, model_choice, base_url, ses
                 mask_parameter
             ]
             
-            # Add API key if provided (for paid API)
+            # Add quality parameter only for paid API (when API key is provided)
             if api_key:
+                api_data_array.append(quality)
+                print(f"  ⚙️  Using quality setting: {quality}")
                 api_data_array.append(api_key)
                 print(f"  🔑 Using API key: {api_key[:8]}...{api_key[-4:] if len(api_key) > 12 else '[SHORT]'}")
+            else:
+                print(f"  🆓 Demo API - no quality parameter (uses fixed normal quality)")
             
             api_data = {"data": api_data_array}
             
@@ -678,7 +682,7 @@ class VTONAPINode:
             if mask_file_path:
                 print(f"Mask image uploaded: {mask_file_path}")
             
-            # Call the VTON API
+            # Call the VTON API (demo version - no quality parameter)
             result_path_or_url = call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path)
             
             if not result_path_or_url:
@@ -712,6 +716,7 @@ class VTONAPIPaidNode:
                 "product_image": ("IMAGE",),
                 "model_choice": (["eyewear", "footwear", "full-body", "top garment"], {"default": "eyewear"}),
                 "api_key": ("STRING", {"default": "ym_your_api_key_here", "multiline": False}),
+                "quality": (["Normal", "High"], {"default": "Normal"}),
             },
             "optional": {
                 "base_person_mask": ("MASK",),  # Optional mask input (MASK type)
@@ -725,7 +730,7 @@ class VTONAPIPaidNode:
     # Disable caching - always execute even with same inputs
     NOT_IDEMPOTENT = True
     
-    def process_vton_paid(self, base_person_image, product_image, model_choice, api_key, base_person_mask=None):
+    def process_vton_paid(self, base_person_image, product_image, model_choice, api_key, quality, base_person_mask=None):
         try:
             # Generate internal cache-buster to force re-execution
             cache_buster = time.time() + random.random()
@@ -738,6 +743,10 @@ class VTONAPIPaidNode:
             api_key = api_key.strip()
             if not api_key.startswith("ym_") or len(api_key) != 32:
                 raise Exception("Invalid API key format. Expected format: ym_29_characters")
+            
+            # Convert quality from display format to API format
+            quality_api = quality.lower()  # "Normal" -> "normal", "High" -> "high"
+            print(f"🎯 Quality setting: {quality} -> {quality_api}")
             
             # Use the production API endpoint
             base_url = "https://api.yourmirror.io"
@@ -838,8 +847,8 @@ class VTONAPIPaidNode:
             if mask_file_path:
                 print(f"Mask image uploaded: {mask_file_path}")
             
-            # Call the VTON API with API key
-            result_path_or_url = call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path, api_key)
+            # Call the VTON API with API key and quality setting
+            result_path_or_url = call_vton_api(base_file_path, product_file_path, model_choice, base_url, session, mask_file_path, api_key, quality_api)
             
             if not result_path_or_url:
                 raise Exception("VTON API call failed - no result returned")

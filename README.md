@@ -40,6 +40,7 @@ Uses the production API with higher reliability, no rate limits, and priority pr
 - **product_image**: The garment/product to try on (required)  
 - **model_choice**: Select from "eyewear", "footwear", "full-body", or "top garment" (required)
 - **api_key**: Your YourMirror API key (required) - format: `ym_29_characters`
+- **quality_tier**: Select quality level - "normal" (16 steps) or "high" (40 steps) (optional, defaults to "normal")
 - **base_person_mask** (optional): Custom mask for precise control
 
 ## Getting API Keys
@@ -93,7 +94,8 @@ To use the **Paid API** node, you need a YourMirror API key:
 - **Non-Commercial License**: Demo image outputs are subjected to a non-commercial license. Check the Terms and Conditions on [studio.yourmirror.io](https://studio.yourmirror.io) for more details.
 
 ### Paid API
-- **Cost**: $0.05 per API call
+- **Cost (Normal Quality)**: $0.05 per API call (16 sampling steps)
+- **Cost (High Quality)**: $0.10 per API call (40 sampling steps)
 - **Rate Limits**: 1000 requests per hour per API key
 - **Processing**: Separate queue, separate endpoints for each sm4ll model
 - **Billing**: Automatic monthly billing based on actual usage
