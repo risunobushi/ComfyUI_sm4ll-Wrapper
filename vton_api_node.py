@@ -875,12 +875,221 @@ class VTONAPIPaidNode:
             print(f"Created error placeholder with shape: {placeholder_tensor.shape}")
             return (placeholder_tensor,)
 
+def call_lookbook_api(person_file_path, garment_file_paths, gender, prompt, quality, api_key, base_url, session):
+    """Call Lookbook API with direct HTTP POST."""
+    try:
+        print(f"\n🎨 Calling Lookbook API with {len(garment_file_paths)} garments, gender: {gender}, quality: {quality}")
+
+        # Build garment images array (up to 4 slots, null for empty)
+        garment_images = []
+        for i in range(4):
+            if i < len(garment_file_paths) and garment_file_paths[i]:
+                garment_images.append({"path": garment_file_paths[i], "meta": {"_type": "gradio.FileData"}})
+            else:
+                garment_images.append(None)
+
+        # Build API payload
+        payload = {
+            "person_image": {"path": person_file_path, "meta": {"_type": "gradio.FileData"}},
+            "garment_images": garment_images,
+            "quality": quality.lower(),
+            "mode": gender.lower(),
+            "api_key": api_key
+        }
+
+        # Add prompt if provided
+        if prompt and prompt.strip():
+            payload["prompt"] = prompt.strip()
+
+        print(f"  📤 API request payload: {json.dumps(payload, indent=2)}")
+
+        # Send POST request to /lookbook endpoint
+        lookbook_url = f"{base_url}/lookbook"
+        print(f"  🚀 Posting to: {lookbook_url}")
+
+        response = session.post(
+            lookbook_url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=600  # 10 minutes for processing
+        )
+
+        print(f"  📨 Response status: {response.status_code}")
+
+        if response.status_code == 200:
+            result_data = response.json()
+            print(f"  ✅ Success! Response: {result_data}")
+
+            # Extract result images from response
+            if result_data.get("data") and len(result_data["data"]) > 0:
+                return result_data["data"][0]  # Return first result image
+            else:
+                print(f"  ❌ No data in response: {result_data}")
+                return None
+        else:
+            print(f"  ❌ API failed: {response.status_code} - {response.text}")
+            return None
+
+    except Exception as e:
+        print(f"  ❌ Lookbook API error: {e}")
+        return None
+
+class VTONLookbookNode:
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "person_image": ("IMAGE",),
+                "garment_1": ("IMAGE",),
+                "garment_2": ("IMAGE",),
+                "garment_3": ("IMAGE",),
+                "garment_4": ("IMAGE",),
+                "mode": (["Male", "Female"], {"default": "Female"}),
+                "quality": (["Normal", "High"], {"default": "Normal"}),
+                "prompt": ("STRING", {"default": "", "multiline": True}),
+                "api_key": ("STRING", {"default": "ym_your_api_key_here", "multiline": False}),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE",)
+    FUNCTION = "process_lookbook"
+    CATEGORY = "sm4ll/VTON"
+
+    # Disable caching - always execute even with same inputs
+    NOT_IDEMPOTENT = True
+
+    def process_lookbook(self, person_image, garment_1, garment_2, garment_3, garment_4, mode, quality, prompt, api_key):
+        try:
+            # Generate internal cache-buster to force re-execution
+            cache_buster = time.time() + random.random()
+            print(f"🎲 Internal cache-buster: {cache_buster:.6f} (ensures fresh execution)")
+
+            # Validate API key format
+            if not api_key or not api_key.strip():
+                raise Exception("API key is required for lookbook API access")
+
+            api_key = api_key.strip()
+            if not api_key.startswith("ym_") or len(api_key) != 32:
+                raise Exception("Invalid API key format. Expected format: ym_29_characters")
+
+            # Use the production API endpoint
+            base_url = "https://api.yourmirror.io"
+
+            # Convert tensors to PIL images and validate
+            person_pil = tensor_to_pil(person_image)
+            garment_1_pil = tensor_to_pil(garment_1)
+
+            print(f"Person image size: {person_pil.size}")
+            print(f"Garment 1 size: {garment_1_pil.size}")
+
+            # Validate minimum size requirements
+            if person_pil.size[0] < 100 or person_pil.size[1] < 100:
+                raise Exception(f"Person image too small: {person_pil.size}. Minimum 100x100 required.")
+            if garment_1_pil.size[0] < 100 or garment_1_pil.size[1] < 100:
+                raise Exception(f"Garment 1 image too small: {garment_1_pil.size}. Minimum 100x100 required.")
+
+            # Resize images to 1.62mpx using Lanczos interpolation
+            person_resized = resize_to_megapixels(person_pil, 1.62)
+            garment_1_resized = resize_to_megapixels(garment_1_pil, 1.62)
+
+            # Ensure images are RGB
+            if person_resized.mode != 'RGB':
+                person_resized = person_resized.convert('RGB')
+            if garment_1_resized.mode != 'RGB':
+                garment_1_resized = garment_1_resized.convert('RGB')
+
+            # Process all garment images (garment_1 is required, others are optional)
+            garment_images = [garment_1_resized]
+            optional_garments = [garment_2, garment_3, garment_4]
+
+            for i, garment in enumerate(optional_garments):
+                if garment is not None:
+                    garment_pil = tensor_to_pil(garment)
+                    print(f"Garment {i+2} size: {garment_pil.size}")
+
+                    if garment_pil.size[0] < 100 or garment_pil.size[1] < 100:
+                        print(f"⚠️  Warning: Garment {i+2} image is very small ({garment_pil.size}), skipping")
+                        continue
+
+                    garment_resized = resize_to_megapixels(garment_pil, 1.62)
+                    if garment_resized.mode != 'RGB':
+                        garment_resized = garment_resized.convert('RGB')
+
+                    garment_images.append(garment_resized)
+
+            print(f"Processing with {len(garment_images)} garment images")
+
+            # Create a session to maintain state
+            session = requests.Session()
+
+            # Upload person image
+            print("Uploading person image...")
+            person_file_path = upload_to_gradio_session(person_resized, base_url, session, is_paid_api=True)
+            if not person_file_path:
+                raise Exception("Failed to upload person image")
+
+            # Upload garment images
+            garment_file_paths = []
+            for i, garment_img in enumerate(garment_images):
+                print(f"Uploading garment {i+1}...")
+                garment_file_path = upload_to_gradio_session(garment_img, base_url, session, is_paid_api=True)
+                if not garment_file_path:
+                    raise Exception(f"Failed to upload garment {i+1} image")
+                garment_file_paths.append(garment_file_path)
+
+            print(f"Person image uploaded: {person_file_path}")
+            print(f"Garment images uploaded: {garment_file_paths}")
+
+            # Call the Lookbook API
+            result_url_or_data = call_lookbook_api(
+                person_file_path,
+                garment_file_paths,
+                mode,
+                prompt,
+                quality,
+                api_key,
+                base_url,
+                session
+            )
+
+            if not result_url_or_data:
+                raise Exception("Lookbook API call failed - no result returned")
+
+            # Handle result - could be URL or base64 data
+            if result_url_or_data.startswith("data:image"):
+                # Base64 data URI - decode directly
+                print("Result is base64 data URI, decoding...")
+                header, data = result_url_or_data.split(",", 1)
+                image_bytes = base64.b64decode(data)
+                result_image = Image.open(io.BytesIO(image_bytes))
+            else:
+                # URL - download the image
+                result_image = download_result_image(result_url_or_data, base_url, session)
+
+            if not result_image:
+                raise Exception("Failed to get result image")
+
+            # Convert result image back to tensor
+            result_tensor = pil_to_tensor(result_image)
+            print("✓ Lookbook processing completed successfully!")
+            return (result_tensor,)
+
+        except Exception as e:
+            print(f"Error in Lookbook processing: {e}")
+            # Return a red placeholder image in case of error
+            placeholder = Image.new('RGB', (512, 512), color=(255, 0, 0))
+            placeholder_tensor = pil_to_tensor(placeholder)
+            print(f"Created error placeholder with shape: {placeholder_tensor.shape}")
+            return (placeholder_tensor,)
+
 NODE_CLASS_MAPPINGS = {
     "VTONAPINode": VTONAPINode,
-    "VTONAPIPaidNode": VTONAPIPaidNode
+    "VTONAPIPaidNode": VTONAPIPaidNode,
+    "VTONLookbookNode": VTONLookbookNode
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "VTONAPINode": "sm4ll Wrapper Sampler - Demo Version",
-    "VTONAPIPaidNode": "sm4ll Wrapper Sampler - Paid API"
+    "VTONAPIPaidNode": "sm4ll Wrapper Sampler - Paid API",
+    "VTONLookbookNode": "sm4ll Wrapper Lookbook Sampler - Paid API"
 } 
