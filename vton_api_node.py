@@ -8,7 +8,6 @@ import json
 import math
 import io
 import random
-import base64
 
 def tensor_to_pil(tensor: torch.Tensor, batch_index=0):
     """Converts a ComfyUI image tensor to a PIL Image (RGB)."""
@@ -942,13 +941,15 @@ class VTONLookbookNode:
             "required": {
                 "person_image": ("IMAGE",),
                 "garment_1": ("IMAGE",),
-                "garment_2": ("IMAGE",),
-                "garment_3": ("IMAGE",),
-                "garment_4": ("IMAGE",),
                 "mode": (["Male", "Female"], {"default": "Female"}),
                 "quality": (["Normal", "High"], {"default": "Normal"}),
                 "prompt": ("STRING", {"default": "", "multiline": True}),
                 "api_key": ("STRING", {"default": "ym_your_api_key_here", "multiline": False}),
+            },
+            "optional": {
+                "garment_2": ("IMAGE",),
+                "garment_3": ("IMAGE",),
+                "garment_4": ("IMAGE",),
             }
         }
 
@@ -959,7 +960,7 @@ class VTONLookbookNode:
     # Disable caching - always execute even with same inputs
     NOT_IDEMPOTENT = True
 
-    def process_lookbook(self, person_image, garment_1, garment_2, garment_3, garment_4, mode, quality, prompt, api_key):
+    def process_lookbook(self, person_image, garment_1, mode, quality, prompt, api_key, garment_2=None, garment_3=None, garment_4=None):
         try:
             # Generate internal cache-buster to force re-execution
             cache_buster = time.time() + random.random()
