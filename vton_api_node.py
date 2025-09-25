@@ -8,6 +8,7 @@ import json
 import math
 import io
 import random
+import base64
 
 def tensor_to_pil(tensor: torch.Tensor, batch_index=0):
     """Converts a ComfyUI image tensor to a PIL Image (RGB)."""
