@@ -904,10 +904,13 @@ def call_lookbook_api(person_image, garment_images, gender, prompt, quality, api
             else:
                 garment_b64_images.append(None)
 
-        # Build API payload with base64 data
+        # Build API payload with base64 data in FileData format
         payload = {
-            "person_image": person_b64,
-            "garment_images": garment_b64_images,
+            "person_image": {"path": person_b64, "meta": {"_type": "gradio.FileData"}},
+            "garment_images": [
+                {"path": garment_b64, "meta": {"_type": "gradio.FileData"}} if garment_b64 else None
+                for garment_b64 in garment_b64_images
+            ],
             "quality": quality.lower(),
             "mode": gender.lower(),
             "api_key": api_key
