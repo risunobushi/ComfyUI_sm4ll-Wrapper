@@ -1062,8 +1062,19 @@ class VTONLookbookNode:
                 image_bytes = base64.b64decode(data)
                 result_image = Image.open(io.BytesIO(image_bytes))
             else:
-                # URL - download the image
-                result_image = download_result_image(result_url_or_data, base_url, session)
+                # URL - download the image directly
+                print(f"Result is URL, downloading: {result_url_or_data}")
+                try:
+                    response = requests.get(result_url_or_data, timeout=30)
+                    if response.status_code == 200:
+                        result_image = Image.open(io.BytesIO(response.content))
+                        print(f"Successfully downloaded result image ({len(response.content)} bytes)")
+                    else:
+                        print(f"Failed to download result: HTTP {response.status_code}")
+                        result_image = None
+                except Exception as e:
+                    print(f"Error downloading result: {e}")
+                    result_image = None
 
             if not result_image:
                 raise Exception("Failed to get result image")
