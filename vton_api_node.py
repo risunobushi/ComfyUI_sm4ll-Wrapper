@@ -8,6 +8,7 @@ import json
 import math
 import io
 import random
+import base64
 
 def tensor_to_pil(tensor: torch.Tensor, batch_index=0):
     """Converts a ComfyUI image tensor to a PIL Image (RGB)."""
@@ -875,23 +876,38 @@ class VTONAPIPaidNode:
             print(f"Created error placeholder with shape: {placeholder_tensor.shape}")
             return (placeholder_tensor,)
 
-def call_lookbook_api(person_file_path, garment_file_paths, gender, prompt, quality, api_key, base_url, session):
-    """Call Lookbook API with direct HTTP POST."""
+def pil_to_base64_data_uri(pil_image):
+    """Convert PIL image to base64 data URI."""
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format='PNG')
+    buffer.seek(0)
+    image_bytes = buffer.getvalue()
+    base64_string = base64.b64encode(image_bytes).decode('utf-8')
+    return f"data:image/png;base64,{base64_string}"
+
+def call_lookbook_api(person_image, garment_images, gender, prompt, quality, api_key, base_url):
+    """Call Lookbook API with direct HTTP POST using base64 images."""
     try:
-        print(f"\n🎨 Calling Lookbook API with {len(garment_file_paths)} garments, gender: {gender}, quality: {quality}")
+        print(f"\n🎨 Calling Lookbook API with {len(garment_images)} garments, gender: {gender}, quality: {quality}")
 
-        # Build garment images array (up to 4 slots, null for empty)
-        garment_images = []
+        # Convert person image to base64 data URI
+        person_b64 = pil_to_base64_data_uri(person_image)
+        print(f"  📸 Converted person image to base64 ({len(person_b64)} chars)")
+
+        # Convert garment images to base64 data URIs (up to 4 slots, null for empty)
+        garment_b64_images = []
         for i in range(4):
-            if i < len(garment_file_paths) and garment_file_paths[i]:
-                garment_images.append({"path": garment_file_paths[i], "meta": {"_type": "gradio.FileData"}})
+            if i < len(garment_images) and garment_images[i]:
+                garment_b64 = pil_to_base64_data_uri(garment_images[i])
+                garment_b64_images.append(garment_b64)
+                print(f"  👕 Converted garment {i+1} to base64 ({len(garment_b64)} chars)")
             else:
-                garment_images.append(None)
+                garment_b64_images.append(None)
 
-        # Build API payload
+        # Build API payload with base64 data
         payload = {
-            "person_image": {"path": person_file_path, "meta": {"_type": "gradio.FileData"}},
-            "garment_images": garment_images,
+            "person_image": person_b64,
+            "garment_images": garment_b64_images,
             "quality": quality.lower(),
             "mode": gender.lower(),
             "api_key": api_key
@@ -901,13 +917,13 @@ def call_lookbook_api(person_file_path, garment_file_paths, gender, prompt, qual
         if prompt and prompt.strip():
             payload["prompt"] = prompt.strip()
 
-        print(f"  📤 API request payload: {json.dumps(payload, indent=2)}")
+        print(f"  📤 Sending payload with base64 images to /lookbook")
 
         # Send POST request to /lookbook endpoint
         lookbook_url = f"{base_url}/lookbook"
         print(f"  🚀 Posting to: {lookbook_url}")
 
-        response = session.post(
+        response = requests.post(
             lookbook_url,
             json=payload,
             headers={"Content-Type": "application/json"},
@@ -918,7 +934,7 @@ def call_lookbook_api(person_file_path, garment_file_paths, gender, prompt, qual
 
         if response.status_code == 200:
             result_data = response.json()
-            print(f"  ✅ Success! Response: {result_data}")
+            print(f"  ✅ Success! Response contains data: {bool(result_data.get('data'))}")
 
             # Extract result images from response
             if result_data.get("data") and len(result_data["data"]) > 0:
@@ -974,8 +990,8 @@ class VTONLookbookNode:
             if not api_key.startswith("ym_") or len(api_key) != 32:
                 raise Exception("Invalid API key format. Expected format: ym_29_characters")
 
-            # Use the production API endpoint
-            base_url = "https://api.yourmirror.io"
+            # Use the apiservice endpoint for lookbook
+            base_url = "https://apiservice.yourmirror.io"
 
             # Convert tensors to PIL images and validate
             person_pil = tensor_to_pil(person_image)
@@ -1021,37 +1037,15 @@ class VTONLookbookNode:
 
             print(f"Processing with {len(garment_images)} garment images")
 
-            # Create a session to maintain state
-            session = requests.Session()
-
-            # Upload person image
-            print("Uploading person image...")
-            person_file_path = upload_to_gradio_session(person_resized, base_url, session, is_paid_api=True)
-            if not person_file_path:
-                raise Exception("Failed to upload person image")
-
-            # Upload garment images
-            garment_file_paths = []
-            for i, garment_img in enumerate(garment_images):
-                print(f"Uploading garment {i+1}...")
-                garment_file_path = upload_to_gradio_session(garment_img, base_url, session, is_paid_api=True)
-                if not garment_file_path:
-                    raise Exception(f"Failed to upload garment {i+1} image")
-                garment_file_paths.append(garment_file_path)
-
-            print(f"Person image uploaded: {person_file_path}")
-            print(f"Garment images uploaded: {garment_file_paths}")
-
-            # Call the Lookbook API
+            # Call the Lookbook API directly with base64 images (no upload needed)
             result_url_or_data = call_lookbook_api(
-                person_file_path,
-                garment_file_paths,
+                person_resized,
+                garment_images,
                 mode,
                 prompt,
                 quality,
                 api_key,
-                base_url,
-                session
+                base_url
             )
 
             if not result_url_or_data:
